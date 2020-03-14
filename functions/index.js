@@ -32,6 +32,31 @@ const isEmail = (email) => {
 
 let errors = {};
 
+const FBAuth = (req, res, next) => {
+	let idToken;
+	if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+		idToken = req.headers.authorization.split('Bearer ');
+	} else {
+		console.log('No token found!');
+		return res.status(403).json({ error: 'Unauthorized' });
+	}
+
+	admin
+		.auth()
+		.verifyIdToken(idToken)
+		.then((decodedToken) => {
+			req.user = decodedToken;
+			return db.collection('users').where('userId', '==', req.user.uid).limit(1).get();
+		}).then(data=>{
+			req.user.userName = data.docs[0].data().userName;
+			return next();
+		})
+		.catch((error) => {
+			console.log('Error validating token!', error);
+			return req.status(403).json(error);			
+		});
+};
+
 app.get('/collection', (req, res) => {
 	db
 		.collection('collection')
@@ -54,13 +79,14 @@ app.get('/collection', (req, res) => {
 		.catch((error) => console.log(error));
 });
 
-app.post('/item', (req, res) => {
+app.post('/item', FBAuth, (req, res) => {
 	const newItem = {
 		name: req.body.name,
 		description: req.body.description,
 		url: req.body.url,
 		type: req.body.type,
 		origin: req.body.origin,
+		createdBy: req.user.userName ? req.user.userName : null,
 		createdAt: new Date().toISOString()
 	};
 
@@ -155,7 +181,11 @@ app.post('/login', (req, res) => {
 		})
 		.catch((error) => {
 			console.log(error);
-			return res.status(500).json({ error: error.code });
+			if (error.code === 'auth/wrong-password') {
+				return res.status(403).json({ message: 'Wrong credentials, please try again.' });
+			} else {
+				return res.status(500).json({ error: error.code });
+			}
 		});
 });
 
